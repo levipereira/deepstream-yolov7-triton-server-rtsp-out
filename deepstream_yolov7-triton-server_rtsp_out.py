@@ -31,8 +31,11 @@ gi.require_version("GstRtspServer", "1.0")
 from gi.repository import Gst, GstRtspServer, GLib
 import configparser
 import datetime
-
+import random
 import argparse
+
+from common.FPS import PERF_DATA
+from common.bus_call import bus_call
 
 MAX_DISPLAY_LEN = 64
 PGIE_CLASS_ID_VEHICLE = 0
@@ -48,91 +51,93 @@ GST_CAPS_FEATURES_NVMM = "memory:NVMM"
 OSD_PROCESS_MODE = 0
 OSD_DISPLAY_TEXT = 0
 pgie_classes_str = [
-    "person",
-    "bicycle",
-    "car",
-    "motorbike",
-    "aeroplane",
-    "bus",
-    "train",
-    "truck",
-    "boat",
-    "traffic light",
-    "fire hydrant",
-    "stop sign",
-    "parking meter",
-    "bench",
-    "bird",
-    "cat",
-    "dog",
-    "horse",
-    "sheep",
-    "cow",
-    "elephant",
-    "bear",
-    "zebra",
-    "giraffe",
-    "backpack",
-    "umbrella",
-    "handbag",
-    "tie",
-    "suitcase",
-    "frisbee",
-    "skis",
-    "snowboard",
-    "sports ball",
-    "kite",
-    "baseball bat",
-    "baseball glove",
-    "skateboard",
-    "surfboard",
-    "tennis racket",
-    "bottle",
-    "wine glass",
-    "cup",
-    "fork",
-    "knife",
-    "spoon",
-    "bowl",
-    "banana",
-    "apple",
-    "sandwich",
-    "orange",
-    "broccoli",
-    "carrot",
-    "hot dog",
-    "pizza",
-    "donut",
-    "cake",
-    "chair",
-    "sofa",
-    "pottedplant",
-    "bed",
-    "diningtable",
-    "toilet",
-    "tvmonitor",
-    "laptop",
-    "mouse",
-    "remote",
-    "keyboard",
-    "cell phone",
-    "microwave",
-    "oven",
-    "toaster",
-    "sink",
-    "refrigerator",
-    "book",
-    "clock",
-    "vase",
-    "scissors",
-    "teddy bear",
-    "hair drier",
-    "toothbrush"
+    "person", "bicycle", "car", "motorbike", "aeroplane", "bus", "train", "truck", "boat", "traffic light",
+    "fire hydrant", "stop sign", "parking meter", "bench", "bird", "cat", "dog", "horse", "sheep", "cow",
+    "elephant", "bear", "zebra", "giraffe", "backpack", "umbrella", "handbag", "tie", "suitcase", "frisbee",
+    "skis", "snowboard", "sports ball", "kite", "baseball bat", "baseball glove", "skateboard", "surfboard",
+    "tennis racket", "bottle", "wine glass", "cup", "fork", "knife", "spoon", "bowl", "banana", "apple",
+    "sandwich", "orange", "broccoli", "carrot", "hot dog", "pizza", "donut", "cake", "chair", "sofa",
+    "pottedplant", "bed", "diningtable", "toilet", "tvmonitor", "laptop", "mouse", "remote", "keyboard",
+    "cell phone", "microwave", "oven", "toaster", "sink", "refrigerator", "book", "clock", "vase", "scissors",
+    "teddy bear", "hair drier", "toothbrush"
 ]
 
+perf_data = None
+
+def generate_random_colors(num_colors):
+    colors = []
+    for _ in range(num_colors):
+        color = (random.randint(0, 255), random.randint(0, 255), random.randint(0, 255))
+        colors.append(color)
+    return colors
 
 # pgie_src_pad_buffer_probe  will extract metadata received on OSD sink pad
 # and update params for drawing rectangle, object information etc.
+
+
+def tiler_sink_pad_buffer_probe(pad, info, u_data):
+
+    gst_buffer = info.get_buffer()
+    if not gst_buffer:
+        print("Unable to get GstBuffer ")
+        return
+
+    # Retrieve batch metadata from the gst_buffer
+    # Note that pyds.gst_buffer_get_nvds_batch_meta() expects the
+    # C address of gst_buffer as input, which is obtained with hash(gst_buffer)
+    batch_meta = pyds.gst_buffer_get_nvds_batch_meta(hash(gst_buffer))
+        
+    
+    l_frame = batch_meta.frame_meta_list
+    while l_frame is not None:
+        try:
+            # Note that l_frame.data needs a cast to pyds.NvDsFrameMeta
+            # The casting is done by pyds.NvDsFrameMeta.cast()
+            # The casting also keeps ownership of the underlying memory
+            # in the C code, so the Python garbage collector will leave
+            # it alone.
+            frame_meta = pyds.NvDsFrameMeta.cast(l_frame.data)
+        except StopIteration:
+            break
+        display_meta = pyds.nvds_acquire_display_meta_from_pool(batch_meta)
+        l_obj = frame_meta.obj_meta_list
+       
+        while l_obj is not None:
+            try:
+                # Casting l_obj.data to pyds.NvDsObjectMeta
+                obj_meta = pyds.NvDsObjectMeta.cast(l_obj.data)
+            except StopIteration:
+                break
+            confidence = round(obj_meta.confidence,2)
+            class_label = pgie_classes_str[obj_meta.class_id]
+            r, g, b = pgie_classes_colors[obj_meta.class_id] 
+            obj_rect = obj_meta.rect_params
+            obj_rect.border_color.set( r, g, b,  1.0)
+            obj_rect.border_width=1
+            obj_meta.text_params.set_bg_clr = 1
+
+            
+            obj_display_text = str(class_label) + " - " + str(confidence)
+            obj_text_params = obj_meta.text_params
+            obj_text_params.display_text = obj_display_text
+            obj_text_params.set_bg_clr = 1
+            obj_text_params.font_params.font_size = 10
+            obj_text_params.font_params.font_color.set(1.0, 1.0, 1.0, 1.0)
+            obj_text_params.text_bg_clr.set(r, g, b, 0.7)
+        
+            try:
+                l_obj = l_obj.next
+            except StopIteration:
+                break
+        pyds.nvds_add_display_meta_to_frame(frame_meta, display_meta)
+        try:
+            l_frame = l_frame.next
+        except StopIteration:
+            break
+        
+
+    return Gst.PadProbeReturn.OK
+
 
 
 def pgie_src_pad_buffer_probe(pad, info, u_data):
@@ -159,14 +164,21 @@ def pgie_src_pad_buffer_probe(pad, info, u_data):
         except StopIteration:
             break
 
-        frame_number = frame_meta.frame_num
-        print(
-            "Frame Number=",
-            frame_number
-        )
-        if ts_from_rtsp:
-            ts = frame_meta.ntp_timestamp/1000000000 # Retrieve timestamp, put decimal in proper position for Unix format
-            print("RTSP Timestamp:",datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')) # Convert timestamp to UTC
+        # frame_number = frame_meta.frame_num
+        # print(
+        #     "Frame Number=",
+        #     frame_number
+        # )
+        # if ts_from_rtsp:
+        #     ts = frame_meta.ntp_timestamp/1000000000 # Retrieve timestamp, put decimal in proper position for Unix format
+        #     print("RTSP Timestamp:",datetime.datetime.utcfromtimestamp(ts).strftime('%Y-%m-%d %H:%M:%S')) # Convert timestamp to UTC
+
+
+         # Update frame rate through this probe
+        stream_index = "stream{0}".format(frame_meta.pad_index)
+        global perf_data
+        perf_data.update_fps(stream_index)
+
 
         try:
             l_frame = l_frame.next
@@ -256,6 +268,11 @@ def create_source_bin(index, uri):
 def main(args):
     # Check input arguments
     number_sources = len(args)
+    global pgie_classes_colors
+    pgie_classes_colors = generate_random_colors(len(pgie_classes_str))
+
+    global perf_data
+    perf_data = PERF_DATA(len(args))
 
     # Standard GStreamer initialization
     Gst.init(None)
@@ -365,8 +382,11 @@ def main(args):
     if ts_from_rtsp:
         streammux.set_property("attach-sys-ts", 0)
 
-    pgie.set_property("config-file-path", "dstest1_pgie_inferserver_config.txt")
+    if triton_model == 'yolov7_qat':
+        pgie.set_property("config-file-path", "yolov7_qat_pgie_inferserver_config.txt")
 
+    if triton_model == 'yolov7':
+        pgie.set_property("config-file-path", "yolov7_pgie_inferserver_config.txt")
 
     pgie_batch_size = pgie.get_property("batch-size")
     if pgie_batch_size != number_sources:
@@ -419,6 +439,13 @@ def main(args):
         sys.stderr.write(" Unable to get src pad \n")
     else:
         pgie_src_pad.add_probe(Gst.PadProbeType.BUFFER, pgie_src_pad_buffer_probe, 0)
+        GLib.timeout_add(5000, perf_data.perf_print_callback)
+
+    tiler_sink_pad = tiler.get_static_pad("sink")
+    if not tiler_sink_pad:
+        sys.stderr.write(" Unable to get src pad \n")
+    else:
+        tiler_sink_pad.add_probe(Gst.PadProbeType.BUFFER, tiler_sink_pad_buffer_probe, 0)
 
     # Start streaming
     rtsp_port_num = 8554
@@ -455,6 +482,10 @@ def parse_args():
     parser = argparse.ArgumentParser(description='RTSP Output Sample Application Help ')
     parser.add_argument("-i", "--input",
                   help="Path to input H264 elementry stream", nargs="+", default=["a"], required=True)
+    parser.add_argument("-m", "--model", default='yolov7_qat',
+                    help="Choose between 'yolov7' or 'yolov7_qat'", 
+                    choices=['yolov7', 'yolov7_qat'], 
+                    type=str)
     parser.add_argument("-c", "--codec", default="H264",
                   help="RTSP Streaming Codec H264/H265 , default=H264", choices=['H264','H265'])
     parser.add_argument("-b", "--bitrate", default=4000000,
@@ -470,9 +501,11 @@ def parse_args():
     global bitrate
     global stream_path
     global ts_from_rtsp
+    global triton_model
     codec = args.codec
     bitrate = args.bitrate
     stream_path = args.input
+    triton_model = args.model
     ts_from_rtsp = args.rtsp_ts
     return stream_path
 
