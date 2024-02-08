@@ -1,6 +1,6 @@
 # Sample Application `deepstream-yolov7-triton-server-rtsp-out`  
 
-The Purpose of this repository is to create a Deepstream/Triton-Server sample application that utilizes YOLOv7 models to perform inference on video files or RTSP streams. It then showcases the output on an RTSP URL, providing a straightforward demonstration of end-to-end AI processing.**
+The Purpose of this repository is to create a Deepstream/Triton-Server sample application that utilizes YOLOv7 models to perform inference on video files or RTSP streams. It then showcases the output on an RTSP URL, providing a straightforward demonstration of end-to-end AI processing.
 
 Follow this steps to Use this Sample App
 
@@ -15,7 +15,7 @@ Follow the steps on below link to Start Deepstream<br>
 [Deepstream - YOLOV7.](https://github.com/levipereira/docker_images/deepstream-yolov7)
 
 
-## 4. Using Sample Application `deepstream-yolov7-triton-server-rtsp-out`  
+### 3. Using Sample Application `deepstream-yolov7-triton-server-rtsp-out`  
 
 To use this sample application, follow the steps below from within the container:
 
